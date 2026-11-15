@@ -1,0 +1,431 @@
+// The wand: a button in the band above the prompt box. A press reads the
+// draft, rewrites it for the model the session runs, and puts the rewrite in
+// the box, with Undo to get the draft back. A long rewrite, or one that could
+// not go in the box, waits in a preview pane for the person to check.
+//
+// Every function here that takes `$` is a top-level declaration, as
+// `claude plugin validate` requires; what they share comes in as arguments.
+
+import { atom, read, update } from 'claude-code'
+import type { EngineInterface, ModelEffort, PluginOptions, Register, Timer, UiPressArgument } from 'claude-code'
+
+import type { DraftKind, WandHoldReason, WandMode, WandPhase } from '../types'
+import { messageOf, rewriteDraft } from './pipeline'
+import type { StopReason } from './pipeline'
+import { targetFor } from './profiles'
+import { MAX_DRAFT_CHARS, problemWith } from './rewrite'
+import type { DraftProblem, Rewriter } from './rewrite'
+
+// The feature's name in one place, so a rename is one edit.
+const NAME = 'Sharpen prompt'
+const DOING = 'Sharpening'
+const DONE = 'Sharpened'
+
+const PANE = 'prompt-wand-preview'
+const PANE_TITLE = 'Rewritten prompt'
+const MODE_KEY = 'mode'
+
+// A rewrite longer than this many lines goes to the preview, not the box.
+const LONG_LINES = 15
+
+/** The call in flight, so Cancel and a sent prompt can stop it, and its clock. */
+type Runner = { current: AbortController | undefined; tick: Timer | undefined }
+
+/** Each mode's rewriter, or what is wrong with that mode's settings. */
+type Rewriters = Record<WandMode, Rewriter | string>
+
+const IDLE: WandPhase = { kind: 'idle' }
+
+// Change the tag when WandPhase changes: what an earlier version stored then
+// reads as idle instead of as a value of the old shape.
+const phase = atom({ plugin: 'prompt-wand', key: 'phase' } as const, IDLE, {
+  shape: 'phase-2',
+})
+const draft = atom({ plugin: 'prompt-wand', key: 'draft' } as const, 'unknown')
+const used = atom({ plugin: 'prompt-wand', key: 'used' } as const, false)
+const mode = atom({ plugin: 'prompt-wand', key: 'mode' } as const, 'thorough')
+
+const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
+const isEffort = (value: unknown): value is ModelEffort =>
+  typeof value === 'string' && EFFORTS.includes(value)
+
+const isMode = (value: unknown): value is WandMode => value === 'quick' || value === 'thorough'
+
+const MODE_TEXT: Record<WandMode, string> = { quick: 'Quick', thorough: 'Thorough' }
+const OTHER_MODE: Record<WandMode, WandMode> = { quick: 'thorough', thorough: 'quick' }
+
+/** One mode's rewriter from its two settings, or what is wrong with them. */
+const rewriterFrom = (model: unknown, effort: unknown, title: string): Rewriter | string => {
+  if (typeof model !== 'string' || model.trim() === '') {
+    return `Set "${title} model" in the prompt-wand settings.`
+  }
+  if (!isEffort(effort)) {
+    return `Set "${title} effort" in the prompt-wand settings to low, medium, high, xhigh or max.`
+  }
+
+  return { model: model.trim(), effort }
+}
+
+const rewritersFrom = (options: PluginOptions): Rewriters => ({
+  thorough: rewriterFrom(options.rewriterModel, options.rewriterEffort, 'Thorough'),
+  quick: rewriterFrom(options.quickModel, options.quickEffort, 'Quick'),
+})
+
+const withCommas = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+
+const PROBLEM_TEXT: Record<DraftProblem, string> = {
+  empty: 'Type your request in the prompt box first.',
+  command: 'Slash commands and shell lines stay as you typed them.',
+  'too-long': `The draft is over ${withCommas(MAX_DRAFT_CHARS)} characters. Shorten it first.`,
+}
+
+const HOLD_TEXT: Record<WandHoldReason, string> = {
+  edited: 'You edited the draft, so it was kept.',
+  dialog: 'A dialog was open, so the draft was kept.',
+  refused: 'The prompt box did not take it.',
+  long: 'Check it before it replaces your draft.',
+}
+
+const kindOf = (text: string): DraftKind => {
+  const problem = problemWith(text)
+  return problem === 'empty' ? 'empty' : problem === 'command' ? 'command' : 'text'
+}
+
+const lineCount = (text: string): number => text.split('\n').length
+
+const isLong = (rewritten: string): boolean => lineCount(rewritten) > LONG_LINES
+
+/** "Claude Opus 5.5" reads as "Opus 5.5" in the band, where space is short. */
+const shortName = (label: string): string => label.replace(/^Claude /, '')
+
+const stop = (runner: Runner, reason: StopReason): void => runner.current?.abort(reason)
+
+const stopTick = (runner: Runner): void => {
+  runner.tick?.cancel()
+  runner.tick = undefined
+}
+
+async function setDraft($: EngineInterface, kind: DraftKind) {
+  // Only a change redraws the band, not every key.
+  if ((await read($, draft)) !== kind) await update($, draft, () => kind)
+}
+
+async function openPreview($: EngineInterface) {
+  const opened = await $.ui.open({ id: PANE, title: PANE_TITLE })
+  if (!opened.isPlaced) $.ui.log(`prompt-wand: preview not shown: ${opened.reason}`, { to: 'debug' })
+}
+
+async function closePreview($: EngineInterface) {
+  await $.ui.close({ id: PANE })
+}
+
+async function fail($: EngineInterface, why: string, canRetry: boolean) {
+  await update($, phase, (): WandPhase => ({ kind: 'failed', why, canRetry }))
+}
+
+async function hold($: EngineInterface, ready: Extract<WandPhase, { kind: 'ready' }>) {
+  await update($, phase, () => ready)
+  await openPreview($)
+}
+
+// Puts the rewrite in the box unless the person typed meanwhile, which a
+// replace would throw away, or the rewrite is long enough to check first.
+async function place($: EngineInterface, target: string, original: string, rewritten: string, summary: string) {
+  const box = await $.prompt.read()
+  const ready = { kind: 'ready', target, rewritten, summary } as const
+
+  if (box.text !== original) return hold($, { ...ready, why: 'edited' })
+  if (isLong(rewritten)) return hold($, { ...ready, why: 'long' })
+
+  const filled = await $.prompt.fill({ text: rewritten, mode: 'replace' })
+
+  if (!filled.isFilled) return hold($, { ...ready, why: filled.refusal === 'dialog' ? 'dialog' : 'refused' })
+
+  await update($, phase, (): WandPhase => ({ kind: 'applied', target, original, summary }))
+}
+
+async function wand($: EngineInterface, rewriters: Rewriters, runner: Runner) {
+  if (runner.current !== undefined) return
+
+  const chosen = await read($, mode)
+  const rewriter = rewriters[chosen]
+
+  if (typeof rewriter === 'string') {
+    await fail($, rewriter, false)
+    return
+  }
+
+  const controller = new AbortController()
+  runner.current = controller
+
+  try {
+    const { text: original } = await $.prompt.read()
+    const problem = problemWith(original)
+
+    if (problem !== undefined) {
+      await fail($, PROBLEM_TEXT[problem], false)
+      return
+    }
+
+    const target = targetFor(await $.session.model())
+    const startedAt = await $.clock.now()
+    await closePreview($)
+    await update($, phase, (): WandPhase => ({ kind: 'working', target: target.label, mode: chosen, startedAt }))
+    // Redraws the band each second so the elapsed time moves.
+    runner.tick = $.clock.every(1000, () => $.ui.invalidate('ui.render'))
+
+    const outcome = await rewriteDraft($, { draft: original, target, rewriter, signal: controller.signal })
+    stopTick(runner)
+
+    switch (outcome.kind) {
+      case 'rewritten':
+        await update($, used, () => true)
+        await place($, target.label, original, outcome.text, outcome.summary)
+        return
+      case 'stopped':
+        // A cancel or a sent prompt needs no word: the person did it.
+        await update($, phase, () => IDLE)
+        return
+      case 'failed':
+        await fail($, `No rewrite: ${outcome.why}. Your draft is unchanged.`, true)
+        return
+    }
+  } catch (error: unknown) {
+    await fail($, `The rewrite failed: ${messageOf(error)}. Your draft is unchanged.`, true)
+  } finally {
+    stopTick(runner)
+    runner.current = undefined
+  }
+}
+
+async function apply($: EngineInterface) {
+  const now = await read($, phase)
+  if (now.kind !== 'ready') return
+
+  const box = await $.prompt.read()
+  const filled = await $.prompt.fill({ text: now.rewritten, mode: 'replace' })
+
+  if (!filled.isFilled) {
+    $.ui.toast(
+      filled.refusal === 'dialog'
+        ? 'Close the open dialog, then press Replace draft again.'
+        : 'The prompt box did not take the rewrite. Press Copy and paste it instead.',
+    )
+    return
+  }
+
+  // Undo then brings back what the box held, the person's later edits included.
+  await update($, phase, (): WandPhase => ({
+    kind: 'applied',
+    target: now.target,
+    original: box.text,
+    summary: now.summary,
+  }))
+  await closePreview($)
+}
+
+async function discard($: EngineInterface) {
+  await update($, phase, () => IDLE)
+  await closePreview($)
+}
+
+async function undo($: EngineInterface) {
+  const now = await read($, phase)
+  if (now.kind !== 'applied') return
+
+  const filled = await $.prompt.fill({ text: now.original, mode: 'replace' })
+
+  if (!filled.isFilled) {
+    $.ui.toast('The prompt box did not take your draft back. Close any open dialog and press Undo again.')
+    return
+  }
+
+  await update($, phase, () => IDLE)
+}
+
+async function copy($: EngineInterface, press: UiPressArgument) {
+  const now = await read($, phase)
+  if (now.kind !== 'ready') return
+
+  const copied = await $.ui.copy({ text: now.rewritten, surface: press.surface })
+
+  $.ui.toast(copied.isCopied ? 'Copied the rewrite.' : `Could not copy the rewrite (${copied.reason}).`)
+}
+
+async function toggleMode($: EngineInterface) {
+  const next = OTHER_MODE[await read($, mode)]
+  await update($, mode, () => next)
+  await $.store.set(MODE_KEY, next)
+}
+
+export const register: Register = (on, options) => {
+  const rewriters = rewritersFrom(options)
+  // A reload starts this over, and `session.start` then clears a stale `working`.
+  const runner: Runner = { current: undefined, tick: undefined }
+  // Whether this surface reports typing. Until it does, an empty-box report
+  // (a clear after a send, say) is not trusted to hide the wand for good.
+  let seesEdits = false
+
+  // The desktop app starts a spare process before a chat claims it, so the
+  // band can be asked for before any surface draws it. Asking again once the
+  // session is up, and on each attach, puts the wand there without a reload.
+  on('session.start', async ($, e, next) => {
+    const now = await read($, phase)
+    if (now.kind === 'working') await update($, phase, () => IDLE)
+
+    const saved = await $.store.get(MODE_KEY)
+    if (isMode(saved)) await update($, mode, () => saved)
+
+    const result = await next(e)
+    $.ui.invalidate('ui.render')
+    return result
+  })
+
+  on('session.attach', async ($, e, next) => {
+    const result = await next(e)
+    $.ui.invalidate('ui.render')
+    return result
+  })
+
+  // The draft as the person types, so the wand hides where it has nothing to do.
+  on('prompt.edit', async ($, e, next) => {
+    const box = await next(e)
+    seesEdits = true
+    setDraft($, kindOf(box.text)).catch((error: unknown) =>
+      $.ui.log(`prompt-wand: draft not tracked: ${messageOf(error)}`, { to: 'debug' }),
+    )
+    return box
+  })
+
+  on('prompt.change', async ($, e, next) => {
+    const result = await next(e)
+    if (seesEdits) await setDraft($, kindOf(e.text))
+    return result
+  })
+
+  // A prompt the person sends ends the wand's part: a rewrite still running is
+  // stale, and Undo would bring back a draft that was already sent.
+  on('prompt.submit', async ($, e, next) => {
+    if (e.isMeta !== true) {
+      stop(runner, 'submitted')
+      const now = await read($, phase)
+      if (now.kind !== 'idle') await update($, phase, () => IDLE)
+      if (now.kind === 'ready') await closePreview($)
+      // The box is empty after a send.
+      if (seesEdits) await setDraft($, 'empty')
+    }
+
+    return next(e)
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
+
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const now = await read($, phase)
+    const row = { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 1 } as const
+
+    switch (now.kind) {
+      case 'idle': {
+        const kind = await read($, draft)
+        if (kind === 'empty' || kind === 'command') return next(e)
+
+        const chosen = await read($, mode)
+        const isUsed = await read($, used)
+
+        return (
+          <Box {...row}>
+            <Button key="wand" label={NAME} onPress={() => wand($, rewriters, runner)}>
+              {isUsed ? '🪄' : `🪄 ${NAME}`}
+            </Button>
+            <Button
+              key="mode"
+              label={`${MODE_TEXT[chosen]} mode. Press for ${MODE_TEXT[OTHER_MODE[chosen]].toLowerCase()} mode`}
+              dimColor
+              onPress={() => toggleMode($)}
+            >
+              {MODE_TEXT[chosen]}
+            </Button>
+          </Box>
+        )
+      }
+      case 'working': {
+        const seconds = Math.max(0, Math.round(((await $.clock.now()) - now.startedAt) / 1000))
+
+        return (
+          <Box {...row}>
+            <Text>
+              🪄 {DOING} for {shortName(now.target)}
+            </Text>
+            <Text dimColor>
+              {MODE_TEXT[now.mode]} · {seconds} s
+            </Text>
+            <Button key="cancel" label="Cancel" dimColor onPress={() => stop(runner, 'cancelled')} />
+          </Box>
+        )
+      }
+      case 'ready':
+        return (
+          <Box {...row}>
+            <Text>
+              🪄 Rewrite ready ({lineCount(now.rewritten)} lines). {HOLD_TEXT[now.why]}
+            </Text>
+            {now.summary !== '' && <Text dimColor>{now.summary}</Text>}
+            <Button key="apply" label="Replace draft" variant="primary" onPress={() => apply($)} />
+            <Button key="preview" label="Show" onPress={() => openPreview($)} />
+            <Button key="copy" label="Copy" onPress={press => copy($, press)} />
+            <Button key="discard" label="Discard" role="dismiss" onPress={() => discard($)} />
+          </Box>
+        )
+      case 'applied':
+        return (
+          <Box {...row}>
+            <Text dimColor>
+              ✓ {DONE} for {shortName(now.target)}
+              {now.summary === '' ? '' : `: ${now.summary}`}
+            </Text>
+            <Button key="undo" label="Undo (until you send)" onPress={() => undo($)} />
+            <Button key="again" label={`${NAME} again`} dimColor onPress={() => wand($, rewriters, runner)}>
+              🪄 Again
+            </Button>
+          </Box>
+        )
+      case 'failed':
+        return (
+          <Box {...row}>
+            <Text>🪄 {now.why}</Text>
+            {now.canRetry && (
+              <Button key="retry" label="Retry" variant="primary" onPress={() => wand($, rewriters, runner)} />
+            )}
+            <Button key="dismiss" label="Dismiss" role="dismiss" onPress={() => update($, phase, () => IDLE)} />
+          </Box>
+        )
+    }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const now = await read($, phase)
+
+    if (now.kind !== 'ready') {
+      return (
+        <Box>
+          <Text dimColor>No rewrite waiting.</Text>
+        </Box>
+      )
+    }
+
+    return (
+      <Box flexDirection="column" gap={1}>
+        {now.summary !== '' && <Text dimColor>{now.summary}</Text>}
+        <Text>{now.rewritten}</Text>
+        <Box flexDirection="row" flexWrap="wrap" gap={1}>
+          <Button key="apply" label="Replace draft" variant="primary" onPress={() => apply($)} />
+          <Button key="copy" label="Copy" onPress={press => copy($, press)} />
+          <Button key="discard" label="Discard" onPress={() => discard($)} />
+        </Box>
+      </Box>
+    )
+  })
+}
