@@ -1,8 +1,21 @@
-# Sharpen prompt (prompt-wand)
+<p align="center">
+  <img src="assets/logo.svg" width="128" height="128" alt="Sharpen prompt logo: a magic wand over a prompt line">
+</p>
 
-A Claude Code mod (a plugin that adds to Claude Code's own interface) that turns a rough draft into a clear prompt before you send it. This README describes version 0.2.0; `claude plugin list` shows the version you have, and the [releases page](https://github.com/CodeWithBehnam/prompt-wand/releases) lists the changes.
+<h1 align="center">Sharpen prompt</h1>
 
-![A rough draft typed into Claude Code becomes a structured prompt after one press of Sharpen prompt](assets/demo-light.gif)
+<p align="center">A Claude Code mod that turns a rough draft into a clear prompt before you send it.</p>
+
+<p align="center">
+  <a href="https://github.com/CodeWithBehnam/prompt-wand/releases"><img src="https://img.shields.io/github/v/release/CodeWithBehnam/prompt-wand?label=release&color=7c3aed" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/CodeWithBehnam/prompt-wand?color=7c3aed" alt="Licence: MIT"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/Claude%20Code-mod-5b5bf0" alt="A Claude Code mod"></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/tested%20with-Claude%20Code%202.1.325-555" alt="Tested with Claude Code 2.1.325"></a>
+</p>
+
+A mod is a plugin that adds to Claude Code's own interface. Its plugin name is `prompt-wand`. This README describes version 0.2.0; `claude plugin list` shows the version you have, and the [releases page](https://github.com/CodeWithBehnam/prompt-wand/releases) lists the changes.
+
+![A rough draft typed into Claude Code, with the Sharpen prompt and With subagents buttons above it, becomes a structured prompt after one press of Sharpen prompt](assets/demo-both-buttons.gif)
 
 Type what you want the way you think it, for example "add a dark mode toggle to settings and remember what the user picked". Press **🪄 Sharpen prompt** in the band above the prompt box. A second model rewrites the draft for the model you have selected. Where the draft needs it, the rewrite names the files that matter, says what done means and adds the check that proves the change. A draft that is already clear changes little. You read the result, edit it if you like, and send it as your own message.
 
