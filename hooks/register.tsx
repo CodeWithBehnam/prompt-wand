@@ -165,8 +165,8 @@ async function agentFilesIn($: EngineInterface, dir: string, source: string): Pr
   } catch (error: unknown) {
     $.ui.log(`prompt-wand: no agents read from ${dir}: ${messageOf(error)}`, { to: 'debug' })
   }
-  const read = await Promise.all(names.map(name => agentFileAt($, `${dir}/${name}`, source)))
-  return read.filter((agent): agent is AgentEntry => agent !== undefined)
+  const agents = await Promise.all(names.map(name => agentFileAt($, `${dir}/${name}`, source)))
+  return agents.filter((agent): agent is AgentEntry => agent !== undefined)
 }
 
 /**
@@ -362,7 +362,7 @@ async function undo($: EngineInterface) {
   await update($, phase, () => IDLE)
 }
 
-async function copy($: EngineInterface, press: UiPressArgument) {
+async function copyRewrite($: EngineInterface, press: UiPressArgument) {
   const now = await read($, phase)
   if (now.kind !== 'ready') return
 
@@ -507,7 +507,7 @@ export const register: Register = (on, options) => {
             {now.summary !== '' && <Text dimColor>{now.summary}</Text>}
             <Button key="apply" label="Replace draft" variant="primary" onPress={() => apply($)} />
             <Button key="preview" label="Show" onPress={() => openPreview($)} />
-            <Button key="copy" label="Copy" onPress={press => copy($, press)} />
+            <Button key="copy" label="Copy" onPress={press => copyRewrite($, press)} />
             <Button key="discard" label="Discard" role="dismiss" onPress={() => discard($)} />
           </Box>
         )
@@ -563,7 +563,7 @@ export const register: Register = (on, options) => {
         <Text>{now.rewritten}</Text>
         <Box flexDirection="row" flexWrap="wrap" gap={1}>
           <Button key="apply" label="Replace draft" variant="primary" onPress={() => apply($)} />
-          <Button key="copy" label="Copy" onPress={press => copy($, press)} />
+          <Button key="copy" label="Copy" onPress={press => copyRewrite($, press)} />
           <Button key="discard" label="Discard" onPress={() => discard($)} />
         </Box>
       </Box>

@@ -20,8 +20,9 @@ export type AgentCatalogue = {
 const MAX_AGENTS = 40
 const MAX_DESCRIPTION_CHARS = 300
 
-const field = (frontmatter: string, key: string): string | undefined => {
-  const match = new RegExp(`^${key}:[ \\t]*(.*)$`, 'm').exec(frontmatter)
+/** One frontmatter field's value, such as `name` or `model`. */
+const field = (frontmatter: string, fieldName: string): string | undefined => {
+  const match = new RegExp(`^${fieldName}:[ \\t]*(.*)$`, 'm').exec(frontmatter)
   const value = match?.[1]?.trim().replace(/^(["'])(.*)\1$/, '$2').trim()
   return value === undefined || value === '' ? undefined : value
 }
