@@ -4,6 +4,9 @@
 
 import type { ModelCompleteRequest, ModelEffort } from 'claude-code'
 
+import type { WandStyle } from '../types'
+import { agentsBlock } from './agents'
+import type { AgentCatalogue } from './agents'
 import { notesFor } from './profiles'
 import type { TargetModel } from './profiles'
 
@@ -25,6 +28,10 @@ export type RewriteInput = {
   /** ISO 8601 date, UTC. */
   readonly today: string
   readonly rewriter: Rewriter
+  /** `subagents`: the prompt also splits the work across subagents. */
+  readonly style: WandStyle
+  /** The subagent types the session can use; only read for `subagents`. */
+  readonly agents: AgentCatalogue | undefined
 }
 
 /** Why a draft is not sent to the rewriter. */
@@ -127,27 +134,53 @@ export const problemWith = (draft: string): DraftProblem | undefined => {
   return undefined
 }
 
+// Added when the person presses "Sharpen with subagents". The models follow
+// the person's choice: Opus 5.5 at medium effort unless a part clearly suits
+// another, and an agent whose definition sets a model keeps it.
+const SUBAGENT_RULES = `<subagent_split>
+The developer pressed "Sharpen with subagents": they want the work split across subagents. This section replaces rule 2's limit on subagent runs. Every other rule still holds. The prompt you write tells the target model how to split the work:
+1. Break the request into parts that can each run on its own. For each part, name the subagent type from <available_subagents> that fits it best, say what to give it, and say what it returns. Where no listed type fits, use general-purpose. Never name a type that is not listed.
+2. Keep in the main session the parts that one or two tool calls settle, the parts that need other parts' results, and the final decisions. Where the project's instructions say subagents only report and the main session edits, keep the edits in the main session.
+3. Say which parts run at the same time, sent in one message, and which wait for another part's result.
+4. Model and effort for each subagent, written as the Agent tool's own values:
+   - If the type's entry in <available_subagents> shows a model, keep it and name no model or effort for that subagent.
+   - Otherwise use model "opus" (Claude Opus 5.5) with effort "medium".
+   - Choose another model only where a part clearly suits it, and give the reason in a few words: "haiku" for a plain search or lookup in files, "fable" for the hardest open-ended reasoning.
+5. A subagent starts with no context. Tell the model to brief each one with the goal, the files or paths, what is already ruled out, and what to return.
+6. If the request is too small to split, say so in one line and give it to one subagent.
+7. End with how the main session combines the results and checks them.
+Put the split in a <subagent_plan> section: one entry per subagent with its type, model and effort, task and what it returns.
+</subagent_split>`
+
 /** The one completion that rewrites the draft. */
-export const requestFor = (input: RewriteInput): ModelCompleteRequest => ({
-  model: input.rewriter.model,
-  effort: input.rewriter.effort,
-  maxTokens: MAX_REPLY_TOKENS,
-  timeoutMs: TIMEOUT_MS,
-  system: [
-    {
-      text: `${RULES}\n\n<model_notes model="${input.target.label}">\n${notesFor(input.target.family)}\n</model_notes>`,
-      cache: true,
-    },
-  ],
-  // Long context first and the ask last, as the long-context guidance says.
-  prompt: [
-    `<target_model>${input.target.label} (the session reports it as "${input.target.reported}")</target_model>`,
-    `<today>${input.today}</today>`,
-    projectBlock(input.project),
-    `<draft>\n${input.draft}\n</draft>`,
-    `Rewrite the draft for ${input.target.label}. Reply with the prompt inside ${OPEN} tags, then the ${CHANGES_OPEN} line.`,
-  ].join('\n\n'),
-})
+export const requestFor = (input: RewriteInput): ModelCompleteRequest => {
+  const isSplit = input.style === 'subagents'
+
+  return {
+    model: input.rewriter.model,
+    effort: input.rewriter.effort,
+    maxTokens: MAX_REPLY_TOKENS,
+    timeoutMs: TIMEOUT_MS,
+    system: [
+      {
+        text: `${RULES}\n\n<model_notes model="${input.target.label}">\n${notesFor(input.target.family)}\n</model_notes>`,
+        cache: true,
+      },
+      ...(isSplit ? [{ text: SUBAGENT_RULES, cache: true as const }] : []),
+    ],
+    // Long context first and the ask last, as the long-context guidance says.
+    prompt: [
+      `<target_model>${input.target.label} (the session reports it as "${input.target.reported}")</target_model>`,
+      `<today>${input.today}</today>`,
+      projectBlock(input.project),
+      ...(isSplit && input.agents !== undefined ? [agentsBlock(input.agents)] : []),
+      `<draft>\n${input.draft}\n</draft>`,
+      isSplit
+        ? `Rewrite the draft for ${input.target.label}, split across subagents as <subagent_split> says. Reply with the prompt inside ${OPEN} tags, then the ${CHANGES_OPEN} line.`
+        : `Rewrite the draft for ${input.target.label}. Reply with the prompt inside ${OPEN} tags, then the ${CHANGES_OPEN} line.`,
+    ].join('\n\n'),
+  }
+}
 
 /** The one line after the prompt, flattened and cut to fit the band; '' when absent. */
 const summaryFrom = (rest: string): string => {

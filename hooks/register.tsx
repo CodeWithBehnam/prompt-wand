@@ -9,7 +9,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelEffort, PluginOptions, Register, Timer, UiPressArgument } from 'claude-code'
 
-import type { DraftKind, WandHoldReason, WandMode, WandPhase } from '../types'
+import type { DraftKind, WandHoldReason, WandMode, WandPhase, WandStyle } from '../types'
+import type { AgentEntry } from './agents'
 import { messageOf, rewriteDraft } from './pipeline'
 import type { StopReason } from './pipeline'
 import { targetFor } from './profiles'
@@ -20,6 +21,11 @@ import type { DraftProblem, Rewriter } from './rewrite'
 const NAME = 'Sharpen prompt'
 const DOING = 'Sharpening'
 const DONE = 'Sharpened'
+const SPLIT_NAME = 'Sharpen prompt with subagents'
+const SPLIT_LABEL = 'With subagents'
+
+const ICON: Record<WandStyle, string> = { plain: '🪄', subagents: '🧩' }
+const STYLE_TAIL: Record<WandStyle, string> = { plain: '', subagents: ' with subagents' }
 
 const PANE = 'prompt-wand-preview'
 const PANE_TITLE = 'Rewritten prompt'
@@ -34,12 +40,20 @@ type Runner = { current: AbortController | undefined; tick: Timer | undefined }
 /** Each mode's rewriter, or what is wrong with that mode's settings. */
 type Rewriters = Record<WandMode, Rewriter | string>
 
+/** What every press needs: the rewriters, the call in flight, the agents offered. */
+type Wand = {
+  readonly rewriters: Rewriters
+  readonly runner: Runner
+  /** Agent types the engine offered the model this session, by name. */
+  readonly offered: Map<string, AgentEntry>
+}
+
 const IDLE: WandPhase = { kind: 'idle' }
 
 // Change the tag when WandPhase changes: what an earlier version stored then
 // reads as idle instead of as a value of the old shape.
 const phase = atom({ plugin: 'prompt-wand', key: 'phase' } as const, IDLE, {
-  shape: 'phase-2',
+  shape: 'phase-3',
 })
 const draft = atom({ plugin: 'prompt-wand', key: 'draft' } as const, 'unknown')
 const used = atom({ plugin: 'prompt-wand', key: 'used' } as const, false)
@@ -120,8 +134,8 @@ async function closePreview($: EngineInterface) {
   await $.ui.close({ id: PANE })
 }
 
-async function fail($: EngineInterface, why: string, canRetry: boolean) {
-  await update($, phase, (): WandPhase => ({ kind: 'failed', why, canRetry }))
+async function fail($: EngineInterface, style: WandStyle, why: string, canRetry: boolean) {
+  await update($, phase, (): WandPhase => ({ kind: 'failed', style, why, canRetry }))
 }
 
 async function hold($: EngineInterface, ready: Extract<WandPhase, { kind: 'ready' }>) {
@@ -131,28 +145,43 @@ async function hold($: EngineInterface, ready: Extract<WandPhase, { kind: 'ready
 
 // Puts the rewrite in the box unless the person typed meanwhile, which a
 // replace would throw away, or the rewrite is long enough to check first.
-async function place($: EngineInterface, target: string, original: string, rewritten: string, summary: string) {
+type Placed = {
+  readonly target: string
+  readonly style: WandStyle
+  readonly original: string
+  readonly rewritten: string
+  readonly summary: string
+}
+
+async function place($: EngineInterface, done: Placed) {
   const box = await $.prompt.read()
-  const ready = { kind: 'ready', target, rewritten, summary } as const
+  const ready = { kind: 'ready', target: done.target, style: done.style, rewritten: done.rewritten, summary: done.summary } as const
 
-  if (box.text !== original) return hold($, { ...ready, why: 'edited' })
-  if (isLong(rewritten)) return hold($, { ...ready, why: 'long' })
+  if (box.text !== done.original) return hold($, { ...ready, why: 'edited' })
+  if (isLong(done.rewritten)) return hold($, { ...ready, why: 'long' })
 
-  const filled = await $.prompt.fill({ text: rewritten, mode: 'replace' })
+  const filled = await $.prompt.fill({ text: done.rewritten, mode: 'replace' })
 
   if (!filled.isFilled) return hold($, { ...ready, why: filled.refusal === 'dialog' ? 'dialog' : 'refused' })
 
-  await update($, phase, (): WandPhase => ({ kind: 'applied', target, original, summary }))
+  await update($, phase, (): WandPhase => ({
+    kind: 'applied',
+    target: done.target,
+    style: done.style,
+    original: done.original,
+    summary: done.summary,
+  }))
 }
 
-async function wand($: EngineInterface, rewriters: Rewriters, runner: Runner) {
+async function wand($: EngineInterface, ctx: Wand, style: WandStyle) {
+  const { rewriters, runner } = ctx
   if (runner.current !== undefined) return
 
   const chosen = await read($, mode)
   const rewriter = rewriters[chosen]
 
   if (typeof rewriter === 'string') {
-    await fail($, rewriter, false)
+    await fail($, style, rewriter, false)
     return
   }
 
@@ -164,35 +193,42 @@ async function wand($: EngineInterface, rewriters: Rewriters, runner: Runner) {
     const problem = problemWith(original)
 
     if (problem !== undefined) {
-      await fail($, PROBLEM_TEXT[problem], false)
+      await fail($, style, PROBLEM_TEXT[problem], false)
       return
     }
 
     const target = targetFor(await $.session.model())
     const startedAt = await $.clock.now()
     await closePreview($)
-    await update($, phase, (): WandPhase => ({ kind: 'working', target: target.label, mode: chosen, startedAt }))
+    await update($, phase, (): WandPhase => ({ kind: 'working', target: target.label, mode: chosen, style, startedAt }))
     // Redraws the band each second so the elapsed time moves.
     runner.tick = $.clock.every(1000, () => $.ui.invalidate('ui.render'))
 
-    const outcome = await rewriteDraft($, { draft: original, target, rewriter, signal: controller.signal })
+    const outcome = await rewriteDraft($, {
+      draft: original,
+      target,
+      rewriter,
+      signal: controller.signal,
+      style,
+      offered: [...ctx.offered.values()],
+    })
     stopTick(runner)
 
     switch (outcome.kind) {
       case 'rewritten':
         await update($, used, () => true)
-        await place($, target.label, original, outcome.text, outcome.summary)
+        await place($, { target: target.label, style, original, rewritten: outcome.text, summary: outcome.summary })
         return
       case 'stopped':
         // A cancel or a sent prompt needs no word: the person did it.
         await update($, phase, () => IDLE)
         return
       case 'failed':
-        await fail($, `No rewrite: ${outcome.why}. Your draft is unchanged.`, true)
+        await fail($, style, `No rewrite: ${outcome.why}. Your draft is unchanged.`, true)
         return
     }
   } catch (error: unknown) {
-    await fail($, `The rewrite failed: ${messageOf(error)}. Your draft is unchanged.`, true)
+    await fail($, style, `The rewrite failed: ${messageOf(error)}. Your draft is unchanged.`, true)
   } finally {
     stopTick(runner)
     runner.current = undefined
@@ -219,6 +255,7 @@ async function apply($: EngineInterface) {
   await update($, phase, (): WandPhase => ({
     kind: 'applied',
     target: now.target,
+    style: now.style,
     original: box.text,
     summary: now.summary,
   }))
@@ -260,9 +297,14 @@ async function toggleMode($: EngineInterface) {
 }
 
 export const register: Register = (on, options) => {
-  const rewriters = rewritersFrom(options)
   // A reload starts this over, and `session.start` then clears a stale `working`.
-  const runner: Runner = { current: undefined, tick: undefined }
+  // The offered agents fill again as the engine next lists them for the model.
+  const ctx: Wand = {
+    rewriters: rewritersFrom(options),
+    runner: { current: undefined, tick: undefined },
+    offered: new Map(),
+  }
+  const { runner } = ctx
   // Whether this surface reports typing. Until it does, an empty-box report
   // (a clear after a send, say) is not trusted to hide the wand for good.
   let seesEdits = false
@@ -285,6 +327,18 @@ export const register: Register = (on, options) => {
   on('session.attach', async ($, e, next) => {
     const result = await next(e)
     $.ui.invalidate('ui.render')
+    return result
+  })
+
+  // The agent types the model is offered: built-in, project, user and plugin
+  // ones, as the session lists them. Only what is offered is recorded.
+  on('agent.offer', async ($, e, next) => {
+    const result = await next(e)
+    if (result.isOffered) {
+      ctx.offered.set(e.agent, { name: e.agent, description: e.description, source: e.source, model: undefined })
+    } else {
+      ctx.offered.delete(e.agent)
+    }
     return result
   })
 
@@ -336,8 +390,11 @@ export const register: Register = (on, options) => {
 
         return (
           <Box {...row}>
-            <Button key="wand" label={NAME} onPress={() => wand($, rewriters, runner)}>
-              {isUsed ? '🪄' : `🪄 ${NAME}`}
+            <Button key="wand" label={NAME} onPress={() => wand($, ctx, 'plain')}>
+              {isUsed ? ICON.plain : `${ICON.plain} ${NAME}`}
+            </Button>
+            <Button key="split" label={SPLIT_NAME} onPress={() => wand($, ctx, 'subagents')}>
+              {isUsed ? ICON.subagents : `${ICON.subagents} ${SPLIT_LABEL}`}
             </Button>
             <Button
               key="mode"
@@ -356,7 +413,8 @@ export const register: Register = (on, options) => {
         return (
           <Box {...row}>
             <Text>
-              🪄 {DOING} for {shortName(now.target)}
+              {ICON[now.style]} {DOING} for {shortName(now.target)}
+              {STYLE_TAIL[now.style]}
             </Text>
             <Text dimColor>
               {MODE_TEXT[now.mode]} · {seconds} s
@@ -369,7 +427,7 @@ export const register: Register = (on, options) => {
         return (
           <Box {...row}>
             <Text>
-              🪄 Rewrite ready ({lineCount(now.rewritten)} lines). {HOLD_TEXT[now.why]}
+              {ICON[now.style]} Rewrite ready ({lineCount(now.rewritten)} lines). {HOLD_TEXT[now.why]}
             </Text>
             {now.summary !== '' && <Text dimColor>{now.summary}</Text>}
             <Button key="apply" label="Replace draft" variant="primary" onPress={() => apply($)} />
@@ -383,20 +441,28 @@ export const register: Register = (on, options) => {
           <Box {...row}>
             <Text dimColor>
               ✓ {DONE} for {shortName(now.target)}
+              {STYLE_TAIL[now.style]}
               {now.summary === '' ? '' : `: ${now.summary}`}
             </Text>
             <Button key="undo" label="Undo (until you send)" onPress={() => undo($)} />
-            <Button key="again" label={`${NAME} again`} dimColor onPress={() => wand($, rewriters, runner)}>
-              🪄 Again
+            <Button
+              key="again"
+              label={`${now.style === 'plain' ? NAME : SPLIT_NAME} again`}
+              dimColor
+              onPress={() => wand($, ctx, now.style)}
+            >
+              {ICON[now.style]} Again
             </Button>
           </Box>
         )
       case 'failed':
         return (
           <Box {...row}>
-            <Text>🪄 {now.why}</Text>
+            <Text>
+              {ICON[now.style]} {now.why}
+            </Text>
             {now.canRetry && (
-              <Button key="retry" label="Retry" variant="primary" onPress={() => wand($, rewriters, runner)} />
+              <Button key="retry" label="Retry" variant="primary" onPress={() => wand($, ctx, now.style)} />
             )}
             <Button key="dismiss" label="Dismiss" role="dismiss" onPress={() => update($, phase, () => IDLE)} />
           </Box>

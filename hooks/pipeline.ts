@@ -3,6 +3,9 @@
 
 import type { EngineInterface, ModelCompleteResult } from 'claude-code'
 
+import type { WandStyle } from '../types'
+import { agentFromFile, catalogueOf } from './agents'
+import type { AgentCatalogue, AgentEntry } from './agents'
 import type { TargetModel } from './profiles'
 import { requestFor, rewriteFrom } from './rewrite'
 import type { ProjectContext, Rewriter } from './rewrite'
@@ -20,6 +23,9 @@ export type RewriteJob = {
   readonly target: TargetModel
   readonly rewriter: Rewriter
   readonly signal: AbortSignal
+  readonly style: WandStyle
+  /** The agent types the session has offered the model so far. */
+  readonly offered: readonly AgentEntry[]
 }
 
 const INSTRUCTION_NAMES = ['CLAUDE.md', '.claude/CLAUDE.md', 'AGENTS.md']
@@ -56,6 +62,48 @@ export async function projectOf($: EngineInterface): Promise<ProjectContext> {
   }
 }
 
+/** The agent definitions in one folder; none where the folder does not exist. */
+async function agentFilesIn($: EngineInterface, dir: string, source: string): Promise<AgentEntry[]> {
+  const listed = await $.fs.list(dir).catch((error: unknown) => {
+    $.ui.log(`prompt-wand: no agents read from ${dir}: ${messageOf(error)}`, { to: 'debug' })
+    return []
+  })
+  const read = await Promise.all(
+    listed
+      .filter(entry => entry.kind === 'file' && entry.name.endsWith('.md'))
+      .map(entry =>
+        $.fs
+          .read(`${dir}/${entry.name}`)
+          .then(text => agentFromFile(text, source))
+          .catch((error: unknown) => {
+            $.ui.log(`prompt-wand: agent file ${entry.name} not read: ${messageOf(error)}`, { to: 'debug' })
+            return undefined
+          }),
+      ),
+  )
+
+  return read.filter((agent): agent is AgentEntry => agent !== undefined)
+}
+
+/**
+ * The subagent types the session can use: the ones it offered the model, with
+ * the models their files set. A project agent wins over a user agent of its name.
+ */
+export async function agentsOf($: EngineInterface, offered: readonly AgentEntry[]): Promise<AgentCatalogue> {
+  const root = await $.session.root()
+  const configured = await $.env.get('CLAUDE_CONFIG_DIR')
+  const home = await $.env.get('HOME')
+  const userDir = configured ?? (home === undefined ? undefined : `${home}/.claude`)
+
+  const [user, project] = await Promise.all([
+    userDir === undefined ? Promise.resolve([]) : agentFilesIn($, `${userDir}/agents`, 'user'),
+    agentFilesIn($, `${root}/.claude/agents`, 'project'),
+  ])
+  const byName = new Map([...user, ...project].map(agent => [agent.name, agent]))
+
+  return catalogueOf(offered, [...byName.values()])
+}
+
 const failureOf = (result: Extract<ModelCompleteResult, { isAnswered: false }>): string => {
   switch (result.reason) {
     case 'api-error':
@@ -79,9 +127,24 @@ export async function rewriteDraft($: EngineInterface, job: RewriteJob): Promise
     $.ui.log(`prompt-wand: rewriting without project context: ${messageOf(error)}`, { to: 'debug' })
     return undefined
   })
+  const agents =
+    job.style === 'subagents'
+      ? await agentsOf($, job.offered).catch((error: unknown) => {
+          $.ui.log(`prompt-wand: splitting without the agent list: ${messageOf(error)}`, { to: 'debug' })
+          return catalogueOf(job.offered, [])
+        })
+      : undefined
   const today = new Date(await $.clock.now()).toISOString().slice(0, 10)
   const result = await $.model.complete(
-    requestFor({ draft: job.draft, target: job.target, project, today, rewriter: job.rewriter }),
+    requestFor({
+      draft: job.draft,
+      target: job.target,
+      project,
+      today,
+      rewriter: job.rewriter,
+      style: job.style,
+      agents,
+    }),
     { signal: job.signal },
   )
 
