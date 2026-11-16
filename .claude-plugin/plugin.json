@@ -9,6 +9,9 @@
   },
   "homepage": "https://github.com/CodeWithBehnam/prompt-wand",
   "repository": "https://github.com/CodeWithBehnam/prompt-wand",
+  "documentationUrl": "https://github.com/CodeWithBehnam/prompt-wand#readme",
+  "supportUrl": "https://github.com/CodeWithBehnam/prompt-wand/issues",
+  "privacyPolicyUrl": "https://github.com/CodeWithBehnam/prompt-wand/blob/main/PRIVACY.md",
   "license": "MIT",
   "keywords": [
     "prompt",

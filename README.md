@@ -1,6 +1,8 @@
-<p align="center">
-  <img src="assets/logo.svg" width="128" height="128" alt="Sharpen prompt logo: a magic wand over a prompt line">
-</p>
+<div align="center">
+
+![Sharpen prompt logo: a magic wand over a prompt line](assets/logo.png)
+
+</div>
 
 <h1 align="center">Sharpen prompt</h1>
 
@@ -126,7 +128,7 @@ Nothing is sent until you press a button. Each press makes one model call on you
 
 Instruction files above the project, such as your personal `~/.claude/CLAUDE.md`, are not sent. **🧩 With subagents** also sends, for up to 40 subagents your session can use, the name, where it is defined, its model and the first 300 characters of its description, including the ones in your `~/.claude/agents`, but not their instructions.
 
-The call times out after five minutes. The mod makes no other network calls and runs no commands. The only file it writes is its own small store in Claude Code's configuration folder, which keeps your Quick or Thorough choice.
+The call times out after five minutes. The mod makes no other network calls and runs no commands. The only file it writes is its own small store in Claude Code's configuration folder, which keeps your Quick or Thorough choice. The full privacy policy is in [PRIVACY.md](PRIVACY.md).
 
 ## Hooks it uses
 
