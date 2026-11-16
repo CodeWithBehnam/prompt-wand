@@ -1,11 +1,22 @@
 {
   "name": "prompt-wand",
-  "version": "0.2.0",
-  "description": "Sharpen prompt: a wand button above the prompt box that rewrites your draft as a clear prompt for the model you have selected.",
+  "displayName": "Sharpen prompt",
+  "version": "0.2.1",
+  "description": "Turns a rough draft into a clear prompt before you send it. One button sharpens the prompt for your model; the other also splits the work across your subagents.",
   "author": {
     "name": "Behnam",
     "url": "https://github.com/CodeWithBehnam"
   },
+  "homepage": "https://github.com/CodeWithBehnam/prompt-wand",
+  "repository": "https://github.com/CodeWithBehnam/prompt-wand",
+  "license": "MIT",
+  "keywords": [
+    "prompt",
+    "prompt-engineering",
+    "claude-code",
+    "subagents",
+    "productivity"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
     "rewriterModel": {
