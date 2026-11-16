@@ -179,15 +179,21 @@ tsc -p ./prompt-wand
 | `hooks/agents.ts` | Parses agent files and builds the agent list for the rewriter |
 | `types/index.d.ts` | The state the mod keeps |
 
-## Contributing
-
-Bug reports and ideas are welcome. Use the issue forms, and the pull request template when you send a change.
-
-For a security problem, follow [SECURITY.md](SECURITY.md) and do not open a public issue.
-
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+## Contributing
+
+Want to contribute or run it locally? See [CONTRIBUTING.md](CONTRIBUTING.md). Everyone who takes part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
+Bug reports and ideas are welcome through the issue forms. For a security problem, follow [SECURITY.md](SECURITY.md) and do not open a public issue.
+
+Thanks to everyone who has contributed:
+
+<a href="https://github.com/CodeWithBehnam/prompt-wand/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=CodeWithBehnam/prompt-wand" alt="Contributors to CodeWithBehnam/prompt-wand">
+</a>
 
 ## Star history
 
