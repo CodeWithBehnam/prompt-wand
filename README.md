@@ -15,7 +15,7 @@
   <a href="#requirements"><img src="https://img.shields.io/badge/tested%20with-Claude%20Code%202.1.325-555" alt="Tested with Claude Code 2.1.325"></a>
 </p>
 
-A mod is a plugin that adds to Claude Code's own interface. Its plugin name is `prompt-wand`. This README describes version 0.2.1; `claude plugin list` shows the version you have, and the [releases page](https://github.com/CodeWithBehnam/prompt-wand/releases) lists the changes.
+A mod is a plugin that adds to Claude Code's own interface. Its plugin name is `prompt-wand`. This README describes version 0.2.2; `claude plugin list` shows the version you have, and the [releases page](https://github.com/CodeWithBehnam/prompt-wand/releases) lists the changes.
 
 ![A rough draft typed into Claude Code, with the Sharpen prompt and With subagents buttons above it, becomes a structured prompt after one press of Sharpen prompt](assets/demo-both-buttons.gif)
 

@@ -1,7 +1,7 @@
 {
   "name": "prompt-wand",
   "displayName": "Sharpen prompt",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Turns a rough draft into a clear prompt before you send it. One button sharpens the prompt for your model; the other also splits the work across your subagents.",
   "author": {
     "name": "Behnam",
