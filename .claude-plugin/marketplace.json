@@ -1,6 +1,9 @@
 {
   "name": "prompt-wand",
-  "owner": { "name": "Behnam" },
+  "description": "Sharpen prompt: a Claude Code mod that turns a rough draft into a clear prompt before you send it.",
+  "owner": {
+    "name": "Behnam"
+  },
   "plugins": [
     {
       "name": "prompt-wand",

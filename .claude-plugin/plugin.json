@@ -2,6 +2,10 @@
   "name": "prompt-wand",
   "version": "0.2.0",
   "description": "Sharpen prompt: a wand button above the prompt box that rewrites your draft as a clear prompt for the model you have selected.",
+  "author": {
+    "name": "Behnam",
+    "url": "https://github.com/CodeWithBehnam"
+  },
   "types": "./types/index.d.ts",
   "userConfig": {
     "rewriterModel": {
@@ -15,7 +19,13 @@
       "title": "Thorough effort",
       "description": "How hard the thorough rewriter thinks: low, medium, high, xhigh or max.",
       "default": "medium",
-      "options": ["low", "medium", "high", "xhigh", "max"]
+      "options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
     },
     "quickModel": {
       "type": "string",
@@ -28,7 +38,13 @@
       "title": "Quick effort",
       "description": "How hard the quick rewriter thinks: low, medium, high, xhigh or max.",
       "default": "low",
-      "options": ["low", "medium", "high", "xhigh", "max"]
+      "options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
     }
   }
 }
