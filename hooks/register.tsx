@@ -3,19 +3,21 @@
 // the box, with Undo to get the draft back. A long rewrite, or one that could
 // not go in the box, waits in a preview pane for the person to check.
 //
-// Every function here that takes `$` is a top-level declaration, as
-// `claude plugin validate` requires; what they share comes in as arguments.
+// Every function that takes `$` is a top-level declaration in this file, and
+// every call on `$` is a plain `$.noun.method(...)` on one line: the plugin
+// directory reads `$` only that way. The pure parts live in the other files.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelEffort, PluginOptions, Register, Timer, UiPressArgument } from 'claude-code'
 
 import type { DraftKind, WandHoldReason, WandMode, WandPhase, WandStyle } from '../types'
-import type { AgentEntry } from './agents'
-import { messageOf, rewriteDraft } from './pipeline'
-import type { StopReason } from './pipeline'
+import { agentFromFile, catalogueOf } from './agents'
+import type { AgentCatalogue, AgentEntry } from './agents'
+import { INSTRUCTION_NAMES, messageOf, outcomeOf, projectFrom } from './pipeline'
+import type { Rewrite, RewriteJob, StopReason } from './pipeline'
 import { targetFor } from './profiles'
-import { MAX_DRAFT_CHARS, problemWith } from './rewrite'
-import type { DraftProblem, Rewriter } from './rewrite'
+import { MAX_DRAFT_CHARS, problemWith, requestFor } from './rewrite'
+import type { DraftProblem, ProjectContext, Rewriter } from './rewrite'
 
 // The feature's name in one place, so a rename is one edit.
 const NAME = 'Sharpen prompt'
@@ -128,6 +130,85 @@ async function setDraft($: EngineInterface, kind: DraftKind) {
 async function openPreview($: EngineInterface) {
   const opened = await $.ui.open({ id: PANE, title: PANE_TITLE })
   if (!opened.isPlaced) $.ui.log(`prompt-wand: preview not shown: ${opened.reason}`, { to: 'debug' })
+}
+
+/** The project's instruction files and top-level names, read as the session sees them. */
+async function projectOf($: EngineInterface): Promise<ProjectContext | undefined> {
+  try {
+    const root = await $.session.root()
+    const found = await $.fs.ancestors({ names: INSTRUCTION_NAMES })
+    const listed = await $.fs.list(root)
+    return projectFrom(root, found, listed)
+  } catch (error: unknown) {
+    $.ui.log(`prompt-wand: rewriting without project context: ${messageOf(error)}`, { to: 'debug' })
+    return undefined
+  }
+}
+
+/** One agent file, or undefined when it cannot be read or has no name. */
+async function agentFileAt($: EngineInterface, path: string, source: string): Promise<AgentEntry | undefined> {
+  try {
+    const text = await $.fs.read(path)
+    return agentFromFile(text, source)
+  } catch (error: unknown) {
+    $.ui.log(`prompt-wand: agent file ${path} not read: ${messageOf(error)}`, { to: 'debug' })
+    return undefined
+  }
+}
+
+/** The agent definitions in one folder; none where the folder does not exist. */
+async function agentFilesIn($: EngineInterface, dir: string, source: string): Promise<AgentEntry[]> {
+  let names: string[] = []
+  try {
+    const listed = await $.fs.list(dir)
+    names = listed.filter(entry => entry.kind === 'file' && entry.name.endsWith('.md')).map(entry => entry.name)
+  } catch (error: unknown) {
+    $.ui.log(`prompt-wand: no agents read from ${dir}: ${messageOf(error)}`, { to: 'debug' })
+  }
+  const read = await Promise.all(names.map(name => agentFileAt($, `${dir}/${name}`, source)))
+  return read.filter((agent): agent is AgentEntry => agent !== undefined)
+}
+
+/**
+ * The subagent types the session can use: the ones it offered the model, with
+ * the models their files set. A project agent wins over a user agent of its name.
+ */
+async function agentsOf($: EngineInterface, offered: readonly AgentEntry[]): Promise<AgentCatalogue> {
+  try {
+    const root = await $.session.root()
+    const configured = await $.env.get('CLAUDE_CONFIG_DIR')
+    const home = await $.env.get('HOME')
+    const userDir = configured ?? (home === undefined ? undefined : `${home}/.claude`)
+    const user = userDir === undefined ? [] : await agentFilesIn($, `${userDir}/agents`, 'user')
+    const project = await agentFilesIn($, `${root}/.claude/agents`, 'project')
+    const byName = new Map([...user, ...project].map(agent => [agent.name, agent]))
+    return catalogueOf(offered, [...byName.values()])
+  } catch (error: unknown) {
+    $.ui.log(`prompt-wand: splitting without the agent list: ${messageOf(error)}`, { to: 'debug' })
+    return catalogueOf(offered, [])
+  }
+}
+
+/**
+ * Rewrites one draft. Resolves the rewrite, or why there is none; rejects only
+ * where the engine refuses to send the request (a blocked model, say).
+ */
+async function rewriteDraft($: EngineInterface, job: RewriteJob): Promise<Rewrite> {
+  const project = await projectOf($)
+  const agents = job.style === 'subagents' ? await agentsOf($, job.offered) : undefined
+  const now = await $.clock.now()
+  const today = new Date(now).toISOString().slice(0, 10)
+  const request = requestFor({
+    draft: job.draft,
+    target: job.target,
+    project,
+    today,
+    rewriter: job.rewriter,
+    style: job.style,
+    agents,
+  })
+  const result = await $.model.complete(request, { signal: job.signal })
+  return outcomeOf(result, job.signal)
 }
 
 async function closePreview($: EngineInterface) {
@@ -243,11 +324,11 @@ async function apply($: EngineInterface) {
   const filled = await $.prompt.fill({ text: now.rewritten, mode: 'replace' })
 
   if (!filled.isFilled) {
-    $.ui.toast(
+    const why =
       filled.refusal === 'dialog'
         ? 'Close the open dialog, then press Replace draft again.'
-        : 'The prompt box did not take the rewrite. Press Copy and paste it instead.',
-    )
+        : 'The prompt box did not take the rewrite. Press Copy and paste it instead.'
+    $.ui.toast(why)
     return
   }
 
@@ -350,12 +431,6 @@ export const register: Register = (on, options) => {
       $.ui.log(`prompt-wand: draft not tracked: ${messageOf(error)}`, { to: 'debug' }),
     )
     return box
-  })
-
-  on('prompt.change', async ($, e, next) => {
-    const result = await next(e)
-    if (seesEdits) await setDraft($, kindOf(e.text))
-    return result
   })
 
   // A prompt the person sends ends the wand's part: a rewrite still running is

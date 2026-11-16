@@ -128,11 +128,25 @@ Instruction files above the project, such as your personal `~/.claude/CLAUDE.md`
 
 The call times out after five minutes. The mod makes no other network calls and runs no commands. The only file it writes is its own small store in Claude Code's configuration folder, which keeps your Quick or Thorough choice.
 
+## Hooks it uses
+
+The mod watches a few Claude Code events. None of them changes what passes through it.
+
+| Hook | What it does |
+| --- | --- |
+| `session.start` | Brings back your Quick or Thorough choice, clears a rewrite left running by a reload, and asks the band to draw. |
+| `session.attach` | Asks the band to draw again when a window attaches to the session. |
+| `agent.offer` | Notes the name, description and source of each subagent type the session offers the model, for **🧩 With subagents**. Every offer passes on unchanged. |
+| `prompt.edit` | Notes whether the prompt box is empty or holds a command, so the band can hide. Your typing passes on unchanged. |
+| `prompt.submit` | When you send a prompt, stops a rewrite that is still running and resets the band. Your prompt is sent unchanged. |
+| `ui.render` | Draws the band above the prompt box and the **Rewritten prompt** pane. |
+
 ## Known limits
 
 - In the Claude desktop app, the band appears after the first message of a new chat. The app starts the session only when you send, so there is nothing to draw the band before that. In the terminal it shows at once.
 - Slash commands and shell lines (a draft that starts with `!`) are not rewritten: they only work as typed. A draft that starts with a path such as `/Users/me/app` is rewritten as usual.
 - A draft over 40,000 characters is refused.
+- The band learns about the draft from your typing. If you bring back an earlier prompt into an empty box, with the up arrow for example, the band appears once you type.
 - The rewriter has notes for the Opus, Sonnet, Haiku and Fable families. For any other model it uses the general rules only.
 - Agent files are read only from the top level of each agents folder, not from subfolders.
 - The rewriter writes in the language and spelling of your draft. It does not run your request or edit files.
