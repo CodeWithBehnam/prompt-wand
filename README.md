@@ -188,3 +188,17 @@ For a security problem, follow [SECURITY.md](SECURITY.md) and do not open a publ
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+## Star history
+
+The chart shows the repository's GitHub stars over time, from [star-history.com](https://www.star-history.com/#codewithbehnam/prompt-wand&Date). It updates by itself. Click it to open the full chart.
+
+<p align="center">
+  <a href="https://www.star-history.com/#codewithbehnam/prompt-wand&Date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=codewithbehnam/prompt-wand&type=Date&theme=dark">
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=codewithbehnam/prompt-wand&type=Date">
+      <img alt="Star history chart: GitHub stars of CodeWithBehnam/prompt-wand over time" src="https://api.star-history.com/svg?repos=codewithbehnam/prompt-wand&type=Date">
+    </picture>
+  </a>
+</p>
