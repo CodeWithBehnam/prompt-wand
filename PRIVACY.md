@@ -1,6 +1,6 @@
 # Privacy policy
 
-This policy covers prompt-wand (Sharpen prompt), an open-source mod for Claude Code. It takes effect on 16 November 2026 and describes version 0.2.2.
+This policy covers prompt-wand (Sharpen prompt), an open-source mod for Claude Code. It takes effect on 16 November 2026 and describes version 0.2.3.
 
 prompt-wand runs on your own computer, inside Claude Code. It has no server, no account and no analytics. Its author receives none of your data.
 

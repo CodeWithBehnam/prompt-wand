@@ -1,7 +1,7 @@
 {
   "name": "prompt-wand",
   "displayName": "Sharpen prompt",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Turns a rough draft into a clear prompt before you send it. One button sharpens the prompt for your model; the other also splits the work across your subagents.",
   "author": {
     "name": "Behnam",
@@ -12,6 +12,8 @@
   "documentationUrl": "https://github.com/CodeWithBehnam/prompt-wand#readme",
   "supportUrl": "https://github.com/CodeWithBehnam/prompt-wand/issues",
   "privacyPolicyUrl": "https://github.com/CodeWithBehnam/prompt-wand/blob/main/PRIVACY.md",
+  "icon": "./.claude-plugin/icon.png",
+  "termsOfServiceUrl": "https://github.com/CodeWithBehnam/prompt-wand/blob/main/LICENSE",
   "license": "MIT",
   "keywords": [
     "prompt",
