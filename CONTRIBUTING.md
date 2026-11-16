@@ -14,13 +14,7 @@ For a security problem, follow [SECURITY.md](SECURITY.md). Do not open a public 
 
 You need Claude Code with mod support. The mod is tested with Claude Code 2.1.325.
 
-First clone your fork or the repository:
-
-```bash
-git clone https://github.com/CodeWithBehnam/prompt-wand.git
-```
-
-Then start Claude Code with the folder:
+First fork the repository on GitHub, then get a copy of your fork with the green **Code** button on its page. Then start Claude Code from the folder above it:
 
 ```bash
 claude --plugin-dir ./prompt-wand

@@ -165,13 +165,7 @@ The mod watches a few Claude Code events. None of them changes what passes throu
 
 ## Development
 
-To run the mod from source, in place of the installed copy, first clone the repository:
-
-```bash
-git clone https://github.com/CodeWithBehnam/prompt-wand.git
-```
-
-Look through the code you cloned. Then start Claude Code with the folder:
+To run the mod from source, in place of the installed copy, first get your own copy of this repository: use the green **Code** button at the top of its GitHub page, or fork it. Look through the code. Then start Claude Code from the folder above it:
 
 ```bash
 claude --plugin-dir ./prompt-wand
