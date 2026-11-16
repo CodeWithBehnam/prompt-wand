@@ -1,0 +1,82 @@
+name: Bug report
+description: Something in Sharpen prompt does not work as the README says.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Before you paste anything below, remove API keys, access tokens and any private text from your draft, your `CLAUDE.md` or your agent files.
+
+        For a security problem, do not use this form. Follow [SECURITY.md](https://github.com/CodeWithBehnam/prompt-wand/blob/main/SECURITY.md).
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: Run `claude --version`.
+      placeholder: "2.1.325 (Claude Code)"
+    validations:
+      required: true
+  - type: input
+    id: mod-version
+    attributes:
+      label: prompt-wand version
+      description: Run `claude plugin list` and copy the version under prompt-wand.
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did it happen?
+      options:
+        - Claude Code in a terminal
+        - Claude desktop app
+        - Other (say which below)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and version
+      placeholder: "macOS 26.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: button
+    attributes:
+      label: Which button?
+      options:
+        - 🪄 Sharpen prompt
+        - 🧩 With subagents
+        - Both
+        - Neither (the band itself)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Number the steps. Say whether Quick or Thorough mode was on.
+      placeholder: |
+        1. Type a draft: "..."
+        2. Press 🪄 Sharpen prompt
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected and what happened
+      description: Copy the exact text the band showed, if any.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: |
+        Start Claude Code with `claude --debug`, reproduce the problem, and copy the lines that mention `prompt-wand`. Remove keys, tokens and private text first.
+      render: text
+    validations:
+      required: false

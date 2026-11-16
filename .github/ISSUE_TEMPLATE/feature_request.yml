@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest a change or a new idea for Sharpen prompt.
+title: "Idea: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: What should the band, the buttons or the rewritten prompt do?
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: An example draft
+      description: A draft you would press the button on, and what you would like back. Remove anything private.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: data
+    attributes:
+      label: Anything new it would send
+      description: If the idea means sending more to the rewriter (files, settings, history), say what. The README lists everything the mod sends today.
+    validations:
+      required: false
